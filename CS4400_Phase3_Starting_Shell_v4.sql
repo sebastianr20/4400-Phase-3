@@ -835,7 +835,15 @@ DELIMITER //
 CREATE PROCEDURE cus_add_item_to_order(IN i_foodTruckName VARCHAR(55), IN i_foodName VARCHAR(55), IN i_purchaseQuantity INT, IN i_orderId INT)
 BEGIN
 
-    -- place your code/solution here
+    set @orderTotal = (select (select price from menuitem where foodTruckName = i_foodTruckName and foodName = i_foodName) * i_purchaseQuantity as total);
+	set @cusBalance = (select balance from customer where username = (select customerUsername from orders where orderID = i_orderId));
+	IF @orderTotal <= @cusBalance THEN
+		INSERT INTO OrderDetail(orderID, foodTruckName, foodName, purchaseQuantity)
+		values (i_orderId, i_foodTruckName, i_foodName, i_purchaseQuantity);
+   
+		UPDATE Customer
+		SET balance = (@cusBalance - @orderTotal) where username = (select customerUsername from orders where orderID = i_orderId);
+	END IF;
 
 END //
 DELIMITER ;
@@ -849,7 +857,11 @@ BEGIN
     CREATE TABLE cus_order_history_result(`date` date, orderID char(10), orderTotal DECIMAL(6, 2),
 		foodNames varchar(100), foodQuantity int);
 
-    -- place your code/solution here
+    insert into cus_order_history_result
+	select orders.date, orders.orderID,  sum(orderdetail.purchaseQuantity * menuItem.price) as orderPrice, group_concat(menuItem.foodName Separator ", ") as itemNames,sum(orderDetail.purchaseQuantity) as totQuantity
+	from orders 
+	left join orderdetail on orders.orderID = orderdetail.orderID 
+	left join menuItem on orderDetail.foodTruckName = menuItem.foodTruckName and orderdetail.foodName = menuItem.foodName where customerusername = i_customerUsername group by orders.orderID; 
 
 END //
 DELIMITER ;
