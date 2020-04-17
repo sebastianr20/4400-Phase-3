@@ -797,7 +797,14 @@ BEGIN
     CREATE TABLE cus_current_information_basic_result(stationName varchar(100), buildingName varchar(100), tags text, `description` text,
 		balance DECIMAL(6, 2));
 
-    -- place your code/solution here
+    SET @station = SELECT stationName FROM Customer WHERE i_customerUsername = Customer.username;
+    SET @building = SELECT buildingName FROM Station WHERE @station = stationName;
+    SET @tags = SELECT tag FROM BuildingTag WHERE @building = buildingName;
+    SET @description = SELECT description FROM Building WHERE @building = buildingName;
+    SET @balance = SELECT balance FROM Customer WHERE i_customerUsername = Customer.username;
+
+    INSERT INTO cus_current_information_basic_result VALUES (@station, @building, GROUP_CONCAT(DISTINCT(@tags) SEPARATOR ',') AS tags, @description, @balance);
+
 
 END //
 DELIMITER ;
@@ -810,7 +817,13 @@ BEGIN
     DROP TABLE IF EXISTS cus_current_information_foodTruck_result;
     CREATE TABLE cus_current_information_foodTruck_result(foodTruckName varchar(100), managerName varchar(100), foodNames text);
 
-    -- place your code/solution here
+    SET @tempStation = SELECT stationName FROM Customer WHERE i_customerUsername = Customer.username;
+    SET @foodTruckName = SELECT foodTruckName FROM Station WHERE @tempStation = stationName;
+    SET @managerUsername = SELECT managerUsername FROM FoodTruck WHERE @foodTruckName = foodTruckName;
+    SET @managerName = SELECT firstname FROM User WHERE @managerUsername = username;
+    SET @foodnames = SELECT foodName FROM MenuItem WHERE @foodTruckName = foodTruckName;
+
+    INSERT INTO cus_current_information_foodTruck_result VALUES (@foodTruckName, @managerName, GROUP_CONCAT(DISTINCT(@foodNames) SEPARATOR ',') AS foodNames);
 
 END //
 DELIMITER ;
