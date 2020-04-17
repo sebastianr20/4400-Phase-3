@@ -821,7 +821,7 @@ DELIMITER //
 CREATE PROCEDURE cus_order(IN i_date DATE, i_customerUsername VARCHAR(55))
 BEGIN
 
-    -- place your code/solution here
+    INSERT INTO Orders(date, customerUsername) VALUES (i_date, i_customerUsername) IF (i_customerUsername IN (SELECT username FROM Customer) and i_date <= CURDATE());
 
 END //
 DELIMITER ;
