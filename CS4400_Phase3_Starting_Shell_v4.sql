@@ -210,9 +210,38 @@ CREATE PROCEDURE register(
                 IN i_password VARCHAR(50),
                 IN i_balance DECIMAL(6,2),
                 IN i_type ENUM('Admin', 'Manager', 'Staff'))
+sp_register:
 BEGIN
-
-    -- place your code/solution here
+		set @n_email = i_email;
+		if (ifnull(i_email, "") = "") then
+			set @n_email = "";
+        end if;
+        if (select count(username) from user where firstname = i_firstname and lastname = i_lastname) > 0 then leave sp_register;
+        end if;
+		if (length(i_password) < 8) then leave sp_register;
+        end if;
+        if (ifnull(i_balance, 0) > 0) then
+			insert into user values (i_username, md5(i_password), i_firstname, i_lastname);
+			insert into customer values (i_username, i_balance, NULL);
+		end if;
+        if (ifnull(i_type, "") = "" or @n_email = "") then leave sp_register;
+		else
+			if not exists (select username from user where username = i_username) then
+					insert into user values (i_username, md5(i_password), i_firstname, i_lastname);
+			end if;
+			insert into employee values (i_username, @n_email);
+			if (i_type = 'Admin') then
+				insert into admin values (i_username);
+			end if;
+            if (i_type = 'Staff') then
+				insert into staff values (i_username, NULL);
+			end if;
+            if (i_type = 'Manager') then
+				insert into manager values (i_username);
+			end if;
+		end if;
+				
+    
 
 END //
 DELIMITER ;
@@ -476,8 +505,10 @@ BEGIN
 
 	DROP TABLE IF EXISTS mn_filter_foodTruck_result;
      CREATE TABLE mn_filter_foodTruck_result(foodTruckName varchar(100), stationName varchar(100),
-		remainingCapacity int, staffCount int, menuItemCount int)
-SELECT foodTruckName, stationName, capacity, COUNT(DISTINCT username), COUNT(DISTINCT foodName)
+		remainingCapacity int, staffCount int, menuItemCount int);
+        
+	INSERT into mn_filter_foodTruck_result    
+	SELECT FoodTruck.foodTruckName, FoodTruck.stationName, capacity - (select count(*) from foodtruck where foodtruck.stationname = station.stationname), COUNT(DISTINCT username), COUNT(DISTINCT foodName)
     FROM FoodTruck
     INNER JOIN STATION
     ON FoodTruck.stationName = STATION.stationName
@@ -487,12 +518,17 @@ SELECT foodTruckName, stationName, capacity, COUNT(DISTINCT username), COUNT(DIS
     ON FoodTruck.foodTruckName = MenuItem.foodTruckName
     WHERE
     (i_managerUsername = managerUsername) AND
-    (i_foodTruckName = foodTruckName OR i_foodTruckName = "") AND
-    (i_stationName = stationName OR i_stationName = "") AND
+    (i_foodTruckName = FoodTruck.foodTruckName OR ifnull(i_foodTruckName,"") = "") AND
+    (i_stationName = FoodTruck.stationName OR ifnull(i_stationName, "") = "") AND
     ((i_hasRemainingCapacity = TRUE AND capacity>0) OR (i_hasRemainingCapacity = FALSE))
-    GROUP BY foodTruckName
+    GROUP BY foodtruck.foodTruckName
     HAVING
-    ((i_minStaffCount IS NULL AND i_maxStaffCount IS NULL) OR (i_minStaffCount IS NULL AND staffCount <= i_maxStaffCount) OR (i_maxStaffCount IS NULL AND i_minStaffCount <= staffCount) OR (staffCount BETWEEN i_minStaffCount AND i_maxStaffCount));
+    ((i_minStaffCount IS NULL AND i_maxStaffCount IS NULL) 
+    OR (i_minStaffCount IS NULL AND (select count(*) from staff where staff.foodtruckname = foodtruck.foodtruckname) <= i_maxStaffCount) 
+    OR (i_maxStaffCount IS NULL AND i_minStaffCount <= (select count(*) from staff where staff.foodtruckname = foodtruck.foodtruckname))
+    OR (((select count(*) from staff where staff.foodtruckname = foodtruck.foodtruckname) BETWEEN i_minStaffCount AND i_maxStaffCount)));
+    
+-- this is a comment
 
 END //
 DELIMITER ;
@@ -555,16 +591,13 @@ CREATE PROCEDURE mn_view_foodTruck_available_staff(IN i_managerUsername VARCHAR(
 BEGIN
 
 	DROP TABLE IF EXISTS mn_view_foodTruck_available_staff_result;
-     CREATE TABLE mn_view_foodTruck_available_staff_result(availableStaff varchar(100))
+     CREATE TABLE mn_view_foodTruck_available_staff_result(availableStaff varchar(100));
+     insert into mn_view_foodTruck_available_staff_result
      SELECT CONCAT(firstName , ' ' , lastName)
-     FROM FoodTruck
-     INNER JOIN STAFF
-     ON FoodTruck.foodTruckName = STAFF.foodTruckName
-     INNER JOIN USER
-     ON STAFF.username = USER.username
-     WHERE
-     (i_managerUsername = managerUsername) AND
-     (i_foodTruckName = foodTruckName);
+     from staff
+     inner join user
+     on staff.username = user.username
+     where (ifnull(foodtruckname, 0) = 0);
 
 END //
 DELIMITER ;
@@ -577,7 +610,8 @@ CREATE PROCEDURE mn_view_foodTruck_staff(i_foodTruckName VARCHAR(50))
 BEGIN
 
     DROP TABLE IF EXISTS mn_view_foodTruck_staff_result;
-    CREATE TABLE mn_view_foodTruck_staff_result(assignedStaff varchar(100))
+    CREATE TABLE mn_view_foodTruck_staff_result(assignedStaff varchar(100));
+    insert into mn_view_foodTruck_staff_result
     SELECT CONCAT(firstName , ' ' , lastName)
     FROM FoodTruck
     INNER JOIN STAFF
@@ -598,12 +632,13 @@ BEGIN
 
 	DROP TABLE IF EXISTS mn_view_foodTruck_menu_result;
      CREATE TABLE mn_view_foodTruck_menu_result(foodTruckName varchar(100), stationName varchar(100), foodName varchar(100), price DECIMAL(6,2));
-     SELECT foodTruckName, stationName, foodName, price
+     insert into mn_view_foodTruck_menu_result
+     SELECT foodtruck.foodTruckName, stationName, foodName, price
      FROM FoodTruck
      INNER JOIN MenuItem
      ON FoodTruck.foodTruckName = MenuItem.foodTruckName
      WHERE
-     (i_foodTruckName = foodTruckName);
+     (i_foodTruckName = foodtruck.foodTruckName);
 
 END //
 DELIMITER ;
@@ -797,13 +832,14 @@ BEGIN
     CREATE TABLE cus_current_information_basic_result(stationName varchar(100), buildingName varchar(100), tags text, `description` text,
 		balance DECIMAL(6, 2));
 
-    SET @station = SELECT stationName FROM Customer WHERE i_customerUsername = Customer.username;
-    SET @building = SELECT buildingName FROM Station WHERE @station = stationName;
-    SET @tags = SELECT tag FROM BuildingTag WHERE @building = buildingName;
-    SET @description = SELECT description FROM Building WHERE @building = buildingName;
-    SET @balance = SELECT balance FROM Customer WHERE i_customerUsername = Customer.username;
-
-    INSERT INTO cus_current_information_basic_result VALUES (@station, @building, GROUP_CONCAT(DISTINCT(@tags) SEPARATOR ',') AS tags, @description, @balance);
+    INSERT INTO cus_current_information_basic_result
+    select Station.stationname, building.buildingname, group_concat(buildingtag.tag separator ",") as tags, description, balance
+	from building
+	inner join Buildingtag on building.buildingname = buildingtag.buildingName
+	inner join Station on building.buildingname = station.buildingname
+	inner join Customer on station.stationname = customer.stationname
+	where username = i_customerUsername
+	group by building.buildingname;
 
 
 END //
@@ -816,14 +852,13 @@ CREATE PROCEDURE cus_current_information_foodTruck(IN i_customerUsername VARCHAR
 BEGIN
     DROP TABLE IF EXISTS cus_current_information_foodTruck_result;
     CREATE TABLE cus_current_information_foodTruck_result(foodTruckName varchar(100), managerName varchar(100), foodNames text);
+    
 
-    SET @tempStation = SELECT stationName FROM Customer WHERE i_customerUsername = Customer.username;
-    SET @foodTruckName = SELECT foodTruckName FROM Station WHERE @tempStation = stationName;
-    SET @managerUsername = SELECT managerUsername FROM FoodTruck WHERE @foodTruckName = foodTruckName;
-    SET @managerName = SELECT firstname FROM User WHERE @managerUsername = username;
-    SET @foodnames = SELECT foodName FROM MenuItem WHERE @foodTruckName = foodTruckName;
-
-    INSERT INTO cus_current_information_foodTruck_result VALUES (@foodTruckName, @managerName, GROUP_CONCAT(DISTINCT(@foodNames) SEPARATOR ',') AS foodNames);
+	INSERT INTO cus_current_information_foodTruck_result 
+select foodtruck.foodtruckname, (select concat(firstname," ", lastname) from user where username = foodtruck.managerusername) as manager, group_concat(menuitem.foodname separator ",") as foods
+	from FoodTruck  
+    inner join Menuitem on menuitem.foodtruckname = foodtruck.foodtruckname
+    where stationName = (select stationName from customer where username = i_customerUsername) group by foodtruckname;
 
 END //
 DELIMITER ;
@@ -834,7 +869,10 @@ DELIMITER //
 CREATE PROCEDURE cus_order(IN i_date DATE, i_customerUsername VARCHAR(55))
 BEGIN
 
-    INSERT INTO Orders(date, customerUsername) VALUES (i_date, i_customerUsername) IF (i_customerUsername IN (SELECT username FROM Customer) and i_date <= CURDATE());
+    
+    IF (i_customerUsername IN (SELECT username FROM Customer) and i_date <= CURDATE()) THEN
+    INSERT INTO Orders(date, customerUsername) VALUES (i_date, i_customerUsername);
+    END IF;
 
 END //
 DELIMITER ;
@@ -871,10 +909,12 @@ BEGIN
 		foodNames varchar(100), foodQuantity int);
 
     insert into cus_order_history_result
-	select orders.date, orders.orderID,  sum(orderdetail.purchaseQuantity * menuItem.price) as orderPrice, group_concat(menuItem.foodName Separator ", ") as itemNames,sum(orderDetail.purchaseQuantity) as totQuantity
+	select orders.date, orders.orderID,  sum(orderdetail.purchaseQuantity * menuItem.price) as orderPrice, group_concat(distinct menuItem.foodName Separator ",") as itemNames, sum(orderDetail.purchaseQuantity) as totQuantity
 	from orders 
 	left join orderdetail on orders.orderID = orderdetail.orderID 
-	left join menuItem on orderDetail.foodTruckName = menuItem.foodTruckName and orderdetail.foodName = menuItem.foodName where customerusername = i_customerUsername group by orders.orderID; 
+	left join menuItem on orderDetail.foodTruckName = menuItem.foodTruckName and orderdetail.foodName = menuItem.foodName
+    where customerusername = i_customerUsername
+    group by orders.orderID;  
 
 END //
 DELIMITER ;
